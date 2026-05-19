@@ -20,8 +20,8 @@ df <- df %>%
   ) %>%
   filter(!is.na(date) & !is.na(price_per_m2))
 
-# 99th percentile filter
-threshold <- quantile(df$price_per_m2, 0.99, na.rm = TRUE)
+# 99.95th percentile filter
+threshold <- quantile(df$price_per_m2, 0.999, na.rm = TRUE)
 df_clean <- df %>%
   filter(price_per_m2 <= threshold) %>%
   arrange(date)
