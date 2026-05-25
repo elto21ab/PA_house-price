@@ -4,9 +4,7 @@
 # =============================================================================
 
 # ── 0.  Packages ────────────────────────────────────────────────────────────
-# install.packages(c("tidyverse","lubridate","tsibble","fable","fabletools",
-#                    "feasts","urca","strucchange","vars","forecast","scales",
-#                    "patchwork"))
+# install.packages(c("tidyverse","lubridate","tsibble","fable","fabletools","feasts","urca","strucchange","vars","forecast","scales","patchwork"))
 
 library(tidyverse)
 library(lubridate)
@@ -30,12 +28,12 @@ theme_set(theme_minimal(base_size = 12))
 
 # ── 0.1  Load & join data ───────────────────────────────────────────────────
 
-df_price <- read_csv("kbh_quarter_sqm_price.csv", show_col_types = FALSE) |>
+df_price <- read_csv("data/kbh_quarter_sqm_price.csv", show_col_types = FALSE) |>
   mutate(date = yq(gsub("K", "Q", Quarter))) |>
   filter(!is.na(date)) |>
   arrange(date)
 
-df_bond <- read_csv("bondInt_quarterly.csv", show_col_types = FALSE) |>
+df_bond <- read_csv("data/bondInt_quarterly.csv", show_col_types = FALSE) |>
   mutate(date = yq(gsub("K", "Q", Quarter))) |>
   filter(!is.na(date)) |>
   arrange(date)
@@ -408,3 +406,5 @@ fit_nt |> select(arimax) |> tidy()
 # =============================================================================
 # End of script
 # =============================================================================
+
+

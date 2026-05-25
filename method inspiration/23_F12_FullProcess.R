@@ -4,6 +4,8 @@
 
 ## Load packages for time-series analysis, forecasting, unit-root tests,
 ## structural break tests, and tidy time-series workflows.
+# install.packages(c("AER"))
+
 library(tseries)
 library(forecast)
 library(urca)
@@ -17,9 +19,13 @@ library(strucchange)
 ## 2. Set working directory
 ## ============================================================
 
-## Set path: personalize your working directory.
-path <- 'C:/Users/tce.eco/OneDrive - CBS - Copenhagen Business School/01 DOCUMENTS/02 TEACHING/02 PREDICTIVE ANALYTICS - F26/Lectures/Lecture 12'
-setwd(path)
+## Get the directory of the currently running script.
+## This works in RStudio and in R when running with source().
+script_dir <- dirname(sys.frame(1)$ofile)
+if (is.null(script_dir) || script_dir == "") {
+  script_dir <- getwd()
+}
+setwd(script_dir)
 
 ## Check that the working directory has been set correctly.
 getwd()
@@ -32,7 +38,7 @@ getwd()
 ## Load monthly US house price data from CSV.
 ## The data is converted to a monthly time-series object and then to a tsibble.
 ## The relevant house price variable is renamed hp and selected for analysis.
-ushp <- as_tsibble(ts(read.csv("US_HP_DI.csv", sep = ","), frequency = 12, start = c(1987, 1)), 
+ushp <- as_tsibble(ts(read.csv("24_US_HP_DI.csv", sep = ","), frequency = 12, start = c(1987, 1)), 
                       index = Date, pivot_longer = FALSE) %>% 
   mutate(hp = CSUSHPISA) %>%
   dplyr::select(hp)
@@ -63,7 +69,7 @@ ggAcf(ushp) +
 
 ## Plot seasonal patterns by year.
 ## gg_season() overlays years to show whether months behave systematically differently.
-gg_season(ushp, year.labels = TRUE, year.labels.left = TRUE) + 
+gg_season(ushp) + 
   ggtitle("Seasonal plot 1")
 
 ## Plot seasonal subseries by month.
@@ -73,8 +79,7 @@ gg_subseries(ushp) +
 
 ## Plot the series against its lagged values.
 ## gg_lag() helps detect serial dependence and nonlinear lag relationships.
-## do.lines = F suppresses connecting lines between points.
-gg_lag(ushp, do.lines = F) + 
+gg_lag(ushp) + 
   ggtitle("Lag plot")
 
 
