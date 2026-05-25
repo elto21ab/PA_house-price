@@ -21,11 +21,11 @@ library(strucchange)
 
 ## Get the directory of the currently running script.
 ## This works in RStudio and in R when running with source().
-script_dir <- dirname(sys.frame(1)$ofile)
-if (is.null(script_dir) || script_dir == "") {
-  script_dir <- getwd()
-}
-setwd(script_dir)
+# script_dir <- dirname(sys.frame(1)$ofile)
+# if (is.null(script_dir) || script_dir == "") {
+#   script_dir <- getwd()
+# }
+setwd("method inspiration")
 
 ## Check that the working directory has been set correctly.
 getwd()

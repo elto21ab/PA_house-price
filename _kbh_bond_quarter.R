@@ -1,3 +1,26 @@
+# _kbh_eda_prices.R
+# Box-Cox on prices
+# Stationarity tests on prices
+# Outputs: lambda, d (differencing order)
+
+# _kbh_breaks_prices.R
+# QLR test on differenced prices
+# Outputs: breakpoint date, restricted sample?
+
+# _kbh_acf_pacf.R
+# ACF/PACF on prices
+# Outputs: candidate (p,q)
+
+# _kbh_check_rate.R
+# Quick: ADF/KPSS on bond rate
+# Outputs: Is rate I(0) or I(1)?
+
+# _kbh_modeling.R
+# Fit ARIMA(p,d,q) 
+# Fit ARIMAX(p,d,q) with rate
+# Compare, validate
+# Outputs: chosen model, forecasts
+
 # Install required packages (uncomment if you haven't installed them yet)
 # install.packages("dplyr")
 # install.packages("readr")
