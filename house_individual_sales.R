@@ -10,7 +10,7 @@ library(lubridate)
 library(ggplot2)
 
 # Load and prep housing data
-df <- read_delim('Housing_data_CPH_original.csv', delim = ';', show_col_types = FALSE)
+df <- read_delim('data/Housing_data_CPH_original.csv', delim = ';', show_col_types = FALSE)
 
 # Format date and calculate price per m2
 df <- df %>%
