@@ -75,19 +75,19 @@ unscale_rate <- function(x) (x - price_min) / (price_max - price_min) *
 ggplot(df, aes(x = date)) +
   geom_line(aes(y = Price,                  colour = "Price per m²"),
             linewidth = 0.9) +
-  geom_line(aes(y = scale_rate(mean_rate),  colour = "Obligationsrente"),
+  geom_line(aes(y = scale_rate(mean_rate),  colour = "Mortgage bond yield"),
             linewidth = 0.9) +
   scale_y_continuous(
     name     = "DKK / m²",
     labels   = comma,
     sec.axis = sec_axis(~ unscale_rate(.),
-                        name   = "Obligationsrente (%)",
+                        name   = "Mortgage bond yield (%)",
                         labels = function(x) sprintf("%.1f%%", x))
   ) +
   scale_colour_manual(values = c("Price per m²"     = "#2563EB",
-                                 "Obligationsrente" = "#DC2626")) +
+                                 "Mortgage bond yield" = "#DC2626")) +
   scale_x_date(date_breaks = "2 years", date_labels = "%Y") +
-  labs(title = "Copenhagen housing prices and obligationsrenten",
+  labs(title = "Copenhagen housing prices and the long-term mortgage bond yield",
        x = NULL, colour = NULL) +
   theme(legend.position    = "bottom",
         axis.title.y.left  = element_text(colour = "#2563EB"),
