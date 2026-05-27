@@ -190,5 +190,3 @@ pacf_plot <- df |>
   autoplot() +
   labs(title = paste0("PACF: Price (BC λ=", round(lambda, 4), ", d=1)"))
 ggsave("plots/02-3_pacf_bc_diff.png", plot = pacf_plot, width = 12, height = 8, units = "cm")
-
-cat("\n✓ ACF/PACF plots saved (02-2, 02-3)\n")
