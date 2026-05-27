@@ -1,6 +1,8 @@
 # =================================================================
 # 01_pricing_eda.R — Exploratory data analysis & prep
 # =================================================================
+# install.packages("tidyverse")
+#fpp3?
 library(tidyverse)
 library(lubridate)
 library(tsibble)
@@ -8,11 +10,14 @@ library(forecast)
 library(feasts)
 library(urca)
 library(scales)
+library(strucchange)
 
 theme_set(theme_minimal(base_size = 12))
 
-# setwd("")
-getwd()
+# Set working directory. U PROBABLY NEED TO CHANGE DIRECTORY!
+# wd <- "/Users/e/Documents/_UNI/PA_house-price"
+# setwd(wd)
+cat("Working directory:", getwd(), "\n")
 
 # ── Load price data ─────────────────────────────────────────────────────────
 df <- read_csv("data/kbh_quarter_sqm_price.csv", show_col_types = FALSE) |>
@@ -21,153 +26,169 @@ df <- read_csv("data/kbh_quarter_sqm_price.csv", show_col_types = FALSE) |>
   arrange(qtr) |>
   as_tsibble(index = qtr)
 
-# ── PLOT #1: Price level ─────────────────────────────────────────────────────────
-ggplot(df, aes(qtr, Price)) +
+# Estimate optimal Box-Cox lambda using Guerrero's method
+lambda <- df |>
+  features(Price, features = guerrero) |>
+  pull(lambda_guerrero)
+
+cat("Box-Cox λ (Guerrero):", lambda, "\n")
+
+# VIZ LEVEL
+price_level_plot <- ggplot(df, aes(qtr, Price)) +
   geom_line(colour = "#2563EB") +
   scale_y_continuous(labels = comma) +
   labs(title = "Price (level)",
        x = NULL, y = "DKK / m²") +
   theme(plot.title = element_text(face = "bold"))
+ggsave("plots/01-1_price_level.png", plot = price_level_plot, width = 14, height = 8, units = "cm")
 
-ggsave("plots/01-1_price_level.png", width = 14, height = 8, units = "cm")
+## Plot the autocorrelation function
+correlgram_plot <- df |> ACF(Price) |> autoplot() + 
+  ggtitle("Correlgram")
+ggsave("plots/01-2_correlgram.png", plot = correlgram_plot, width = 12, height = 8, units = "cm")
 
+## Plot seasonal patterns by year
+seasonal_plot_1 <- gg_season(df, Price) + 
+  ggtitle("Seasonal plot 1")
+ggsave("plots/01-3_seasonal_1.png", plot = seasonal_plot_1, width = 12, height = 8, units = "cm")
 
-# ── 0.2  Train / test split ─────────────────────────────────────────────────
-train <- df |> filter(qtr <= yearquarter("2019 Q4"))
-test  <- df |> filter(qtr >  yearquarter("2019 Q4"))
+## Plot seasonal subseries by quarter
+seasonal_plot_2 <- gg_subseries(df, Price) + 
+  ggtitle("Seasonal plot 2")
+ggsave("plots/01-4_seasonal_2.png", plot = seasonal_plot_2, width = 12, height = 8, units = "cm")
 
-# Estimate optimal Box-Cox lambda using Guerrero's method
-lambda <- train |>
-  features(Price, features = guerrero) |>
-  pull(lambda_guerrero)
+## Plot the series against its lagged values
+df_lag <- df |>
+  mutate(Price_k = Price / 1000)
 
-# Apply Box-Cox transformation
-train <- train |>
-  mutate(price_transformed = box_cox(Price, lambda))
+lag_plot <- gg_lag(df_lag, Price_k) + 
+  ggtitle("Lag plot") +
+  labs(x = "lag(Price, n) [thousands]", y = "Price [thousands]") +
+  theme(
+    axis.text = element_text(size = 8),
+    strip.text = element_text(size = 9)
+  )
+ggsave("plots/01-5_lag_plot.png", plot = lag_plot, width = 14, height = 10, units = "cm")
 
-### SANITY CHECK
-cat("\n--- TRAIN/TEST SPLIT ---\nTrain n =", nrow(train), "| Test n =", nrow(test), "\n")
-cat(lambda)
-train
-### SANITY CHECK
-
-# Calculate volatility metrics
-vol_raw <- sd(diff(train$Price), na.rm = TRUE)
-vol_transformed <- sd(diff(train$price_transformed), na.rm = TRUE)
-vol_reduction <- (1 - vol_transformed / vol_raw) * 100
-
-# ── Summary statistics ──────────────────────────────────────────────────────────
-sprintf("\n--- HOUSING PRICE SERIES (%s – %s | n = %d) ---\nRange: %d – %d DKK/m²\n  Min @ %s | Max @ %s\nTotal growth in period: %.1f%%\nBox-Cox λ (Guerrero): %.4f\nVolatility (raw): %.3f | (transformed): %.3f | Reduction: %.5f%%\n",
-        format(min(train$qtr)), format(max(train$qtr)), nrow(train),
-        min(train$Price), max(train$Price),
-        format(train$qtr[which.min(train$Price)]), format(train$qtr[which.max(train$Price)]),
-        (max(train$Price) - min(train$Price)) / min(train$Price) * 100,
-        lambda, vol_raw, vol_transformed, vol_reduction) |> cat()
-
-# ── PLOT #2a: Transformed price level & non-differenced ──────────────────────────────────────
-ggplot(train, aes(qtr, price_transformed)) +
-  geom_line(colour = "#2563EB") +
-  labs(title = paste0("Price (transformed, λ = ", round(lambda, 4), ")"),
-       x = NULL, y = "Transformed price") +
-  theme(plot.title = element_text(face = "bold"))
-
-ggsave("plots/01-2a_price_trans.png", width = 14, height = 8, units = "cm")
+## Decompose the series using X-13ARIMA-SEATS
+if (requireNamespace("seasonal", quietly = TRUE)) {
+  seats_dcmp <- df %>%
+    model(seats = X_13ARIMA_SEATS(Price ~ x11())) %>%
+    components()
+  decomposition_plot <- autoplot(seats_dcmp) +
+    labs(title = "Decomposition of price using X-13ARIMA-SEATS")
+} else {
+  message("Package 'seasonal' is not installed; using STL decomposition for plot 6.")
+  stl_dcmp <- df %>%
+    model(stl = STL(Price ~ season(window = "periodic"))) %>%
+    components()
+  decomposition_plot <- autoplot(stl_dcmp) +
+    labs(title = "Decomposition of price using STL")
+}
+ggsave("plots/01-6_decomposition.png", plot = decomposition_plot, width = 14, height = 10, units = "cm")
 
 # =================================================================
-# DIFFERENCING ORDER SELECTION (d = 0, 1, 2), ADF & KPSS comparison
+# UNIT-ROOT TESTS ON LEVELS and FIRST DIFFERENCE (d=1)
 # =================================================================
-# Prepare series for each d
-series_d0 <- train$price_transformed
-series_d1 <- diff(train$price_transformed)
-series_d2 <- diff(train$price_transformed, differences = 2)
 
-# ADF tests
-adf_d0 <- ur.df(series_d0, type = "drift", selectlags = "AIC")
-adf_d1 <- ur.df(series_d1, type = "drift", selectlags = "AIC")
-adf_d2 <- ur.df(series_d2, type = "drift", selectlags = "AIC")
-
-# KPSS tests
-kpss_d0 <- ur.kpss(series_d0, type = "mu")
-kpss_d1 <- ur.kpss(series_d1, type = "mu")
-kpss_d2 <- ur.kpss(series_d2, type = "mu")
-
-# Create summary table
-results <- tibble(
-  d = 0:2,
-  adf_stat = c(adf_d0@teststat[1], adf_d1@teststat[1], adf_d2@teststat[1]),
-  adf_cv_5pct = c(adf_d0@cval[2, 2], adf_d1@cval[2, 2], adf_d2@cval[2, 2]),
-  adf_reject = adf_stat < adf_cv_5pct,
-  kpss_stat = c(kpss_d0@teststat, kpss_d1@teststat, kpss_d2@teststat),
-  kpss_cv_5pct = c(kpss_d0@cval[2], kpss_d1@cval[2], kpss_d2@cval[2]),
-  kpss_reject = kpss_stat < kpss_cv_5pct
-)
-
-cat("Lags selected (AIC):\n")
-cat("d=0:", adf_d0@lags, "lags\n")
-cat("d=1:", adf_d1@lags, "lags\n")
-cat("d=2:", adf_d2@lags, "lags\n")
-
-cat("Results (5% significance level):\n")
-results
-
-# Decide on d: both ADF & KPSS should agree
-best_d <- results |>
-  filter(adf_reject & kpss_reject) |>
-  slice(1) |>
-  pull(d)
-
-if (is.na(best_d)) {
-  best_d <- results |> filter(adf_reject) |> slice(1) |> pull(d)
-  print("⚠ WARNING: No consensus between ADF & KPSS. Using ADF result.")
+ur_tidy <- function(x, label) {
+  # ADF: trend, drift, none (AIC auto-selects lags)
+  adf_trend <- ur.df(x, type = "trend", selectlags = "AIC")
+  adf_drift <- ur.df(x, type = "drift", selectlags = "AIC")
+  adf_none  <- ur.df(x, type = "none", selectlags = "AIC")
+  
+  # KPSS: tau, mu
+  kpss_tau  <- ur.kpss(x, type = "tau")
+  kpss_mu   <- ur.kpss(x, type = "mu")
+  
+  tibble(
+    series      = label,
+    ADF_trend   = round(adf_trend@teststat[1], 3),
+    ADF_drift   = round(adf_drift@teststat[1], 3),
+    ADF_none    = round(adf_none@teststat[1], 3),
+    KPSS_tau    = round(kpss_tau@teststat, 3),
+    KPSS_mu     = round(kpss_mu@teststat, 3)
+  )
 }
 
-cat("\n✓ DECISION: d =", best_d)
-
-# =================================================================
-# STATIONARITY CONFIRMATION
-# =================================================================
-cat("\nSTATIONARITY CONFIRMATION (d=", best_d, ")\n", sep = "")
-
-# Get differenced series for chosen d
-diff_price <- switch(best_d + 1,
-  train$price_transformed,  # d=0
-  diff(train$price_transformed),  # d=1
-  diff(train$price_transformed, differences = 2)  # d=2
+bind_rows(
+  ur_tidy(as.ts(df$Price),              "levels"),
+  ur_tidy(as.ts(na.omit(diff(df$Price))), "diff_1")
 )
 
-cat("\nADF test (H0: unit root):\n")
-summary(ur.df(diff_price, type = "none", selectlags = "AIC"))
+# =================================================================
+# STRUCTURAL BREAK TEST (QLR / Quandt-Likelihood Ratio)
+# =================================================================
+# Test for parameter instability in differenced series
+# Prepares data: Lag0 = current diff, Lag1 = lagged diff
+diff_price_ts <- as.ts(df$Price) %>% diff() %>% na.omit()
 
-cat("\nKPSS test (H0: stationarity):\n")
-summary(ur.kpss(diff_price, type = "mu"))
-
-
-# ── PLOT #2b: Transformed price level & differenced ──────────────────────────────────────
-train_diff <- train |>
-  mutate(price_diff = c(NA, diff(price_transformed))) |>
-  drop_na(price_diff)
-
-ggplot(train_diff, aes(qtr, price_diff)) +
-  geom_line(colour = "#2563EB") +
-  labs(title = paste0("Price (transformed, d=1, λ = ", round(lambda, 4), ")"),
-       x = NULL, y = "Differenced price") +
-  theme(plot.title = element_text(face = "bold"))
-
-ggsave("plots/01-2b_price_trans_diff.png", width = 14, height = 8, units = "cm")
-
-
-# ── ACF / PACF for d=1 (differenced) ──────────────────────────────────────────
-# Get differenced series for chosen d
-diff_price <- switch(best_d + 1,
-  train$price_transformed,  # d=0
-  diff(train$price_transformed),  # d=1
-  diff(train$price_transformed, differences = 2)  # d=2
+break_data <- cbind(
+  Lag0 = diff_price_ts,
+  Lag1 = stats::lag(diff_price_ts)
 )
 
-train |> ACF(difference(price_transformed, differences = best_d), lag_max = 24) |> autoplot() +
-  labs(title = paste0("ACF: Δ price (d=", best_d, ")"))
-ggsave(paste0("plots/01-3_price_trans_diff_acf", best_d, ".png"), width = 12, height = 8, units = "cm")
+# Compute recursive F-statistics (tests intercept & lag coef stability)
+qlr <- Fstats(Lag0 ~ 1 + Lag1, data = break_data, from = 0.10)
 
-train |> PACF(difference(price_transformed, differences = best_d), lag_max = 24) |> autoplot() +
-  labs(title = paste0("PACF: Δ price (d=", best_d, ")"))
-ggsave(paste0("plots/01-4_price_trans_diff_pacf", best_d, ".png"), width = 12, height = 8, units = "cm")
+cat("\n✓ STRUCTURAL BREAK TEST (Quandt-Likelihood Ratio):\n")
+
+# supF test: H0 = no structural break
+break_test <- sctest(qlr, type = "supF")
+print(break_test)
+
+# Estimate breakpoints (α=0.05)
+bp <- breakpoints(qlr, alpha = 0.05)
+cat("\nEstimated breakpoints (α=0.05):\n")
+print(bp)
+
+# Plot & interpret
+png("plots/02-1_qlr_fstats.png", width = 1200, height = 800, res = 100)
+plot(qlr, alpha = 0.05, main = "F-Statistics for Structural Breaks")
+lines(bp)
+dev.off()
+
+# Interpretation
+if (break_test$p.value < 0.05) {
+  cat("\n⚠ STRUCTURAL BREAK DETECTED (p =", round(break_test$p.value, 4), ")\n")
+  cat("   Model coefficients unstable. Consider regime-switching or sample split.\n")
+} else if (break_test$p.value < 0.10) {
+  cat("\n⚠ WEAK EVIDENCE of break (p =", round(break_test$p.value, 4), ") — borderline\n")
+} else {
+  cat("\n✓ NO STRUCTURAL BREAKS (p =", round(break_test$p.value, 4), ")\n")
+}
+
+# =================================================================
+# I DON'T FULLY UNDERTSTAND THE QLR (ABOVE) TEST YET
+# =================================================================
+
+# Apply Box-Cox transformation & first difference
+if (abs(lambda) < 0.001) {
+  df <- df |>
+    mutate(price_bc = log(Price))
+} else {
+  df <- df |>
+    mutate(price_bc = (Price^lambda - 1) / lambda)
+}
+
+df <- df |>
+  mutate(price_bc_diff = difference(price_bc))
+
+cat("\n✓ Box-Cox transformation (λ=", round(lambda, 4), ") & differencing applied.\n")
+
+# ── ACF / PACF: Box-Cox transformed & differenced (d=1) ──────────────────────
+# ACF plot
+acf_plot <- df |>
+  ACF(price_bc_diff, lag_max = 24) |>
+  autoplot() +
+  labs(title = paste0("ACF: Price (BC λ=", round(lambda, 4), ", d=1)"))
+ggsave("plots/02-2_acf_bc_diff.png", plot = acf_plot, width = 12, height = 8, units = "cm")
+
+# PACF plot
+pacf_plot <- df |>
+  PACF(price_bc_diff, lag_max = 24) |>
+  autoplot() +
+  labs(title = paste0("PACF: Price (BC λ=", round(lambda, 4), ", d=1)"))
+ggsave("plots/02-3_pacf_bc_diff.png", plot = pacf_plot, width = 12, height = 8, units = "cm")
+
+cat("\n✓ ACF/PACF plots saved (02-2, 02-3)\n")

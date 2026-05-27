@@ -4,14 +4,16 @@
 
 ## Load packages for time-series analysis, forecasting, unit-root tests,
 ## structural break tests, and tidy time-series workflows.
-# install.packages(c("AER"))
+#install.packages(c("AER"))
+#install.packages(c("tseries", "forecast", "urca", "xts", "fpp3", "AER", "strucchange"))
+#install.packages("AER")
 
 library(tseries)
 library(forecast)
 library(urca)
 library(xts)
 library(fpp3)
-library(AER)
+#library(AER)
 library(strucchange)
 
 
@@ -25,7 +27,7 @@ library(strucchange)
 # if (is.null(script_dir) || script_dir == "") {
 #   script_dir <- getwd()
 # }
-setwd("method inspiration")
+setwd("/Users/e/Documents/_UNI/PA_house-price/method inspiration")
 
 ## Check that the working directory has been set correctly.
 getwd()
@@ -43,7 +45,6 @@ ushp <- as_tsibble(ts(read.csv("24_US_HP_DI.csv", sep = ","), frequency = 12, st
   mutate(hp = CSUSHPISA) %>%
   dplyr::select(hp)
 
-
 ## ============================================================
 ## 4. Check for possible Box-Cox transformation
 ## ============================================================
@@ -54,6 +55,8 @@ lambda <- ushp |>
   features(hp, features = guerrero) |>
   pull(lambda_guerrero)
 
+ushp
+lambda
 ## ============================================================
 ## 5. Preliminary visual analysis
 ## ============================================================
