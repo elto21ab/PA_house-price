@@ -96,10 +96,10 @@ results <- tibble(
   d = 0:2,
   adf_stat = c(adf_d0@teststat[1], adf_d1@teststat[1], adf_d2@teststat[1]),
   adf_cv_5pct = c(adf_d0@cval[1, 2], adf_d1@cval[1, 2], adf_d2@cval[1, 2]),
-  adf_reject = adf_stat < adf_cv_5pct,
+  adf_stationary = adf_stat < adf_cv_5pct,
   kpss_stat = c(kpss_d0@teststat, kpss_d1@teststat, kpss_d2@teststat),
   kpss_cv_5pct = c(kpss_d0@cval[2], kpss_d1@cval[2], kpss_d2@cval[2]),
-  kpss_reject = kpss_stat < kpss_cv_5pct
+  kpss_stationary = kpss_stat < kpss_cv_5pct
 )
 
 cat("Lags selected (AIC):\n")
