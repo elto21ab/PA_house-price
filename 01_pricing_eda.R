@@ -21,6 +21,17 @@ df <- read_csv("data/kbh_quarter_sqm_price.csv", show_col_types = FALSE) |>
   arrange(qtr) |>
   as_tsibble(index = qtr)
 
+# ── PLOT #1: Price level ─────────────────────────────────────────────────────────
+ggplot(df, aes(qtr, Price)) +
+  geom_line(colour = "#2563EB") +
+  scale_y_continuous(labels = comma) +
+  labs(title = "Price (level)",
+       x = NULL, y = "DKK / m²") +
+  theme(plot.title = element_text(face = "bold"))
+
+ggsave("plots/01-1_price_level.png", width = 14, height = 8, units = "cm")
+
+
 # ── 0.2  Train / test split ─────────────────────────────────────────────────
 train <- df |> filter(qtr <= yearquarter("2019 Q4"))
 test  <- df |> filter(qtr >  yearquarter("2019 Q4"))
@@ -35,6 +46,7 @@ train <- train |>
   mutate(price_transformed = box_cox(Price, lambda))
 
 ### SANITY CHECK
+cat("\n--- TRAIN/TEST SPLIT ---\nTrain n =", nrow(train), "| Test n =", nrow(test), "\n")
 cat(lambda)
 train
 ### SANITY CHECK
@@ -52,24 +64,14 @@ sprintf("\n--- HOUSING PRICE SERIES (%s – %s | n = %d) ---\nRange: %d – %d D
         (max(train$Price) - min(train$Price)) / min(train$Price) * 100,
         lambda, vol_raw, vol_transformed, vol_reduction) |> cat()
 
-# ── Price level (raw) ─────────────────────────────────────────────────────────
-ggplot(train, aes(qtr, Price)) +
-  geom_line(colour = "#2563EB") +
-  scale_y_continuous(labels = comma) +
-  labs(title = "Price (level)",
-       x = NULL, y = "DKK / m²") +
-  theme(plot.title = element_text(face = "bold"))
-
-ggsave("plots/01-1_price_level.png", width = 14, height = 8, units = "cm")
-
-# ── Transformed price level & differenced ──────────────────────────────────────
+# ── PLOT #2a: Transformed price level & non-differenced ──────────────────────────────────────
 ggplot(train, aes(qtr, price_transformed)) +
   geom_line(colour = "#2563EB") +
-  labs(title = paste0("Price (Box-Cox transformed, λ = ", round(lambda, 4), ")"),
+  labs(title = paste0("Price (transformed, λ = ", round(lambda, 4), ")"),
        x = NULL, y = "Transformed price") +
   theme(plot.title = element_text(face = "bold"))
 
-ggsave("plots/01-2_price_transformed.png", width = 14, height = 8, units = "cm")
+ggsave("plots/01-2a_price_trans.png", width = 14, height = 8, units = "cm")
 
 # =================================================================
 # DIFFERENCING ORDER SELECTION (d = 0, 1, 2), ADF & KPSS comparison
@@ -100,6 +102,11 @@ results <- tibble(
   kpss_reject = kpss_stat < kpss_cv_5pct
 )
 
+cat("Lags selected (AIC):\n")
+cat("d=0:", adf_d0@lags, "lags\n")
+cat("d=1:", adf_d1@lags, "lags\n")
+cat("d=2:", adf_d2@lags, "lags\n")
+
 cat("Results (5% significance level):\n")
 results
 
@@ -116,6 +123,39 @@ if (is.na(best_d)) {
 
 cat("\n✓ DECISION: d =", best_d)
 
+# =================================================================
+# STATIONARITY CONFIRMATION
+# =================================================================
+cat("\nSTATIONARITY CONFIRMATION (d=", best_d, ")\n", sep = "")
+
+# Get differenced series for chosen d
+diff_price <- switch(best_d + 1,
+  train$price_transformed,  # d=0
+  diff(train$price_transformed),  # d=1
+  diff(train$price_transformed, differences = 2)  # d=2
+)
+
+cat("\nADF test (H0: unit root):\n")
+summary(ur.df(diff_price, type = "none", selectlags = "AIC"))
+
+cat("\nKPSS test (H0: stationarity):\n")
+summary(ur.kpss(diff_price, type = "mu"))
+
+
+# ── PLOT #2b: Transformed price level & differenced ──────────────────────────────────────
+train_diff <- train |>
+  mutate(price_diff = c(NA, diff(price_transformed))) |>
+  drop_na(price_diff)
+
+ggplot(train_diff, aes(qtr, price_diff)) +
+  geom_line(colour = "#2563EB") +
+  labs(title = paste0("Price (transformed, d=1, λ = ", round(lambda, 4), ")"),
+       x = NULL, y = "Differenced price") +
+  theme(plot.title = element_text(face = "bold"))
+
+ggsave("plots/01-2b_price_trans_diff.png", width = 14, height = 8, units = "cm")
+
+
 # ── ACF / PACF for d=1 (differenced) ──────────────────────────────────────────
 # Get differenced series for chosen d
 diff_price <- switch(best_d + 1,
@@ -126,18 +166,8 @@ diff_price <- switch(best_d + 1,
 
 train |> ACF(difference(price_transformed, differences = best_d), lag_max = 24) |> autoplot() +
   labs(title = paste0("ACF: Δ price (d=", best_d, ")"))
-ggsave(paste0("plots/01-3_acf_d", best_d, ".png"), width = 12, height = 8, units = "cm")
+ggsave(paste0("plots/01-3_price_trans_diff_acf", best_d, ".png"), width = 12, height = 8, units = "cm")
 
 train |> PACF(difference(price_transformed, differences = best_d), lag_max = 24) |> autoplot() +
   labs(title = paste0("PACF: Δ price (d=", best_d, ")"))
-ggsave(paste0("plots/01-4_pacf_d", best_d, ".png"), width = 12, height = 8, units = "cm")
-# =================================================================
-# STATIONARITY CONFIRMATION
-# =================================================================
-cat("STATIONARITY CONFIRMATION (d=", best_d, ")", sep = "")
-
-cat("ADF test (H0: unit root):\n")
-summary(ur.df(diff_price, type = "none", selectlags = "AIC"))
-
-cat("\nKPSS test (H0: stationarity):\n")
-summary(ur.kpss(diff_price, type = "mu"))
+ggsave(paste0("plots/01-4_price_trans_diff_pacf", best_d, ".png"), width = 12, height = 8, units = "cm")
