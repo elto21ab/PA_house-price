@@ -11,15 +11,18 @@ library (urca)
 library (strucchange)
 library (scales)
 
+select <- dplyr::select
+
 train  <- read_rds("data/train.rds")
 test   <- read_rds("data/test.rds")
 
 # Rate leads price by 1 period: price_t uses rate_{t-1}.
-train <- train |>
-	mutate(rate_d = difference(rate))
+#train <- train |>
+#	mutate(rate_d = difference(rate))
 
-test <- test |>
-	mutate(rate_d = difference(rate))
+#test <- test |>
+#	mutate(rate_d = difference(rate))
+
 
 train
 test
@@ -53,6 +56,7 @@ lag_grid <- tibble(k = k_candidates) |>
 print(lag_grid |> select(k, AICc))
 best_k <- lag_grid$k[which.min(lag_grid$AICc)]
 cat("\nBest lag (AICc):", best_k, "Q\n")
+#best_k = 2 lags
 
 # Keep full train/test; build lagged slices only where needed.
 train_lag <- train |>
