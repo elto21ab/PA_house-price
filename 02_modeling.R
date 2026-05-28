@@ -1,123 +1,252 @@
 # =============================================================================
-# 02_stationarity_breaks.R — Structural break tests (housing ∼ bond rate)
+# 02_modeling.R — Bivariate analysis & modelling (ARIMA, ARIMAX, VAR)
+# Predictive Analytics, CBS
+# =============================================================================
+# Loads cleaned data saved by 01_combined_eda.R, applies the train/test split
+# here, then runs the full modelling pipeline:
+#
+#   - Bivariate diagnostics (CCF, QLR break test on Δprice ~ Δrate)
+#   - Lag selection for the rate
+#   - ARIMA, ARIMAX, VAR estimation
+#   - Residual diagnostics + Ljung-Box
+#   - Forecast on holdout, plot, RMSE/MAE/MAPE comparison
 # =============================================================================
 
-# # ── 0.2  Train / test split ─────────────────────────────────────────────────
-# train <- df |> filter(qtr <= yearquarter("2019 Q4"))
-# test  <- df |> filter(qtr >  yearquarter("2019 Q4"))
 
-# cat("\n--- TRAIN/TEST SPLIT ---\nTrain n =", nrow(train), "| Test n =", nrow(test), "\n")
-# train
-### SANITY CHECK
+# ── 0.  Packages ────────────────────────────────────────────────────────────
+# install.packages(c("tidyverse","tsibble","fable","fabletools","feasts",
+#                    "urca","strucchange","scales"))
 
-# ── PLOT #2b: price level differenced ──────────────────────────────────────
-# df_diff <- df |>
-#   mutate(df = c(NA, diff(price))) |>
-#   drop_na(df)
-
-# ggplot(train_diff, aes(qtr, price_diff)) +
-#   geom_line(colour = "#2563EB") +
-#   labs(title = paste0("Price (d=1, transformedλ = ", round(lambda, 4), ")"),
-#        x = NULL, y = "Differenced price") +
-#   theme(plot.title = element_text(face = "bold"))
-
-# ggsave("plots/01-2c_price_trans_diff.png", width = 14, height = 8, units = "cm")
-
-
-#===========================================================================#
-
-# # Calculate volatility metrics
-# vol_raw <- sd(diff(train$Price), na.rm = TRUE)
-# vol_transformed <- sd(diff(train$price_transformed), na.rm = TRUE)
-# vol_reduction <- (1 - vol_transformed / vol_raw) * 100
-
-# # ── Summary statistics ──────────────────────────────────────────────────────────
-# sprintf("\n--- HOUSING PRICE SERIES (%s – %s | n = %d) ---\nRange: %d – %d DKK/m²\n  Min @ %s | Max @ %s\nTotal growth in period: %.1f%%\nBox-Cox λ (Guerrero): %.4f\nVolatility (raw): %.3f | (transformed): %.3f | Reduction: %.5f%%\n",
-#         format(min(train$qtr)), format(max(train$qtr)), nrow(train),
-#         min(train$Price), max(train$Price),
-#         format(train$qtr[which.min(train$Price)]), format(train$qtr[which.max(train$Price)]),
-#         (max(train$Price) - min(train$Price)) / min(train$Price) * 100,
-#         lambda, vol_raw, vol_transformed, vol_reduction) |> cat()
-
-# ── PLOT #2a: Transformed price level & non-differenced ──────────────────────────────────────
-# ggplot(train, aes(qtr, price_transformed)) +
-#   geom_line(colour = "#2563EB") +
-#   labs(title = paste0("Price (transformed, λ = ", round(lambda, 4), ")"),
-#        x = NULL, y = "Transformed price") +
-#   theme(plot.title = element_text(face = "bold"))
-# ggsave("plots/01-2a_price_trans.png", width = 14, height = 8, units = "cm")
-
-
-# =================================================================
-# 04_models.R — ARIMA, ARIMAX, VAR/Granger
-# =================================================================
 library(tidyverse)
 library(tsibble)
-library(forecast)
-library(vars)
+library(fable)
+library(fabletools)
+library(feasts)
 library(urca)
+library(strucchange)
+library(scales)
 
-# -- Load & align ------------------------------------------------
-price <- readRDS("data/price_clean.rds") |> select(qtr, price_bc)
-rate  <- readRDS("data/rate_clean.rds")  |> select(qtr, rate_diff = rate_diff)
-lambda<- readRDS("data/lambda.rds")
+# Defensive rebinds: stats::filter / stats::lag mask dplyr versions otherwise.
+select <- dplyr::select
+filter <- dplyr::filter
+lag    <- dplyr::lag
 
-df <- price |>
-  inner_join(rate, by = "qtr") |>
-  as_tsibble(index = qtr) |>
-  mutate(price_diff = difference(price_bc),
-         rate_diff  = rate_diff) |>
-  filter(!is.na(price_diff), !is.na(rate_diff))
+theme_set(theme_minimal(base_size = 12))
 
-cat("Aligned obs:", nrow(df), "\n")
 
-# -- Cointegration & causality -----------------------------------
-joh <- ca.jo(as.matrix(df[, c("price_bc","rate_diff")]), type = "trace", ecdet = "const", K = 2)
-summary(joh)   # rank=0 → no cointegration
+# =============================================================================
+# 1. LOAD CLEANED DATA AND JOIN
+# =============================================================================
 
-# VAR in diffs for Granger (valid under I(1) regardless)
-vard <- VAR(as.matrix(df[, c("price_diff","rate_diff")]), p = 2, type = "const")
-causality(vard, cause = "rate_diff")  # H0: rate does NOT Granger-cause price
+price  <- read_rds("data/price_clean.rds")
+rate   <- read_rds("data/rate_clean.rds")
+lambda <- read_rds("data/lambda.rds")
 
-# -- Train / test split ------------------------------------------
-n   <- nrow(df)
-trn <- 1:floor(n * 0.8)
-tst <- (floor(n * 0.8) + 1):n
+cat("Loaded Box-Cox λ from EDA:", round(lambda, 4), "\n")
 
-y_train <- df$price_bc[trn]
-y_test  <- df$price_bc[tst]
+df <- inner_join(as_tibble(price), as_tibble(rate), by = "qtr") |>
+  arrange(qtr) |>
+  as_tsibble(index = qtr)
 
-# -- Univariate fits ---------------------------------------------
-fit_naive <- rwf(y_train, drift = TRUE)
-fit_110   <- Arima(y_train, order = c(1,1,0), lambda = lambda)
-fit_auto  <- auto.arima(y_train, lambda = lambda, stepwise = TRUE)
+cat("Joined sample:", format(min(df$qtr)), "to", format(max(df$qtr)),
+    " (n =", nrow(df), ")\n")
 
-# -- ARIMAX (xreg = differenced rate) ----------------------------
-X_train <- cbind(rate_diff = df$rate_diff[trn])
-X_test  <- cbind(rate_diff = df$rate_diff[tst])
 
-fit_x110  <- Arima(y_train, order = c(1,1,0), xreg = X_train, lambda = lambda)
-fit_xauto <- auto.arima(y_train, xreg = X_train, lambda = lambda, stepwise = TRUE)
+# =============================================================================
+# 2. TRAIN / TEST SPLIT (training ≤ 2019 Q4)
+# =============================================================================
+# Everything downstream — Box-Cox λ, lag selection, model fitting — uses
+# the training set only. The test set is touched once, in the forecast step.
 
-# -- Forecasts -------------------------------------------------
-h <- length(tst)
+cutoff_qtr <- yearquarter("2019 Q4")
 
-fc_naive  <- forecast(fit_naive,  h = h)
-fc_110    <- forecast(fit_110,   h = h)
-fc_auto   <- forecast(fit_auto,  h = h)
-fc_x110   <- forecast(fit_x110,  h = h, xreg = X_test)
-fc_xauto  <- forecast(fit_xauto, h = h, xreg = X_test)
+train <- df |> filter(qtr <= cutoff_qtr)
+test  <- df |> filter(qtr >  cutoff_qtr)
 
-# -- Accuracy ----------------------------------------------------
-accuracy <- tibble(
-  model = c("naive","arima110","auto","arimax110","arimaxAuto"),
-  RMSE  = map_dbl(list(fc_naive,fc_110,fc_auto,fc_x110,fc_xauto),
-                  ~ sqrt(mean((.x$mean - y_test)^2))),
-  MAPE  = map_dbl(list(fc_naive,fc_110,fc_auto,fc_x110,fc_xauto),
-                  ~ mean(abs((.x$mean - y_test)/y_test))*100)
-)
-print(accuracy)
+cat("Train:", format(min(train$qtr)), "to", format(max(train$qtr)),
+    " (n =", nrow(train), ")\n")
+cat("Test: ", format(min(test$qtr)),  "to", format(max(test$qtr)),
+    " (n =", nrow(test), ")\n")
 
-# -- Diagnostics -------------------------------------------------
-checkresiduals(fit_110)
-checkresiduals(fit_x110)
+
+# =============================================================================
+# 3. BUILD log(Price) FOR MODELLING
+# =============================================================================
+# We use the Box-Cox λ estimated in 01_combined_eda.R (loaded above).
+# Since that λ is very close to 0, we work with the natural log throughout
+# for interpretability — a coefficient on Δlog(Price) reads as a percent
+# change in the original DKK/m² scale.
+
+train <- train |> mutate(log_price = log(Price))
+test  <- test  |> mutate(log_price = log(Price))
+
+
+# =============================================================================
+# 4. CROSS-CORRELATION (CCF) — Δlog(Price) vs. Δrate
+# =============================================================================
+# Visualises the lead-lag relationship. Negative lags = rate leads price.
+
+dlogp <- diff(train$log_price)
+drate <- diff(train$rate)
+
+ccf(drate, dlogp, lag.max = 12,
+    main = "CCF: Δrate (x) vs. Δlog(Price) (y)")
+
+
+# =============================================================================
+# 5. STRUCTURAL BREAK TEST (BIVARIATE QLR / supF)
+# =============================================================================
+# Tests for an unknown break in the relationship Δlog(Price)_t = α + β·Δrate_t.
+# This is the substantively interesting break test for our research question.
+
+bp_data <- tibble(dlogp = diff(train$log_price),
+                  drate = diff(train$rate))
+
+fs <- Fstats(dlogp ~ drate, data = bp_data, from = 0.15)
+plot(fs, main = "QLR (supF) test — Δlog(Price) ~ Δrate")
+print(sctest(fs))
+
+break_idx  <- which.max(fs$Fstats) + floor(0.15 * nrow(bp_data))
+break_date <- train$qtr[break_idx + 1]   # +1 because we differenced
+cat("\nEstimated break date:", format(break_date), "\n")
+
+
+# =============================================================================
+# 6. LAG SELECTION FOR THE EXOGENOUS RATE
+# =============================================================================
+# Try ARIMAX with the rate entering at lags 0, 1, 2, 4 and pick the lag with
+# the lowest AICc.
+
+lag_grid <- tibble(k = c(0, 1, 2, 4)) |>
+  mutate(model = map(k, ~ {
+    d <- train |>
+      mutate(rate_lag = lag(rate, .x)) |>
+      filter(!is.na(rate_lag))
+    d |> model(ARIMA(log_price ~ rate_lag,
+                     stepwise = FALSE, approximation = FALSE))
+  }),
+  AICc = map_dbl(model, ~ glance(.x)$AICc))
+
+print(lag_grid |> select(k, AICc))
+best_k <- lag_grid$k[which.min(lag_grid$AICc)]
+cat("\nBest lag for rate:", best_k, "Q\n")
+
+
+# =============================================================================
+# 7. ESTIMATE ARIMA AND ARIMAX
+# =============================================================================
+# Full AICc grid search (stepwise = FALSE, approximation = FALSE).
+
+train <- train |> mutate(rate_lag = lag(rate, best_k))
+test  <- test  |> mutate(rate_lag = lag(rate, best_k))
+
+fit_uni <- train |>
+  filter(!is.na(rate_lag)) |>
+  model(
+    arima  = ARIMA(log_price,
+                   stepwise = FALSE, approximation = FALSE),
+    arimax = ARIMA(log_price ~ rate_lag,
+                   stepwise = FALSE, approximation = FALSE)
+  )
+
+report(fit_uni |> select(arima))
+report(fit_uni |> select(arimax))
+
+
+# =============================================================================
+# 8. ESTIMATE BIVARIATE VAR
+# =============================================================================
+# fable::VAR is qualified explicitly because library(vars) (if loaded
+# elsewhere) would mask it with the lower-level vars::VAR.
+
+fit_var <- train |>
+  model(var = fable::VAR(vars(log_price, rate), ic = "aicc"))
+report(fit_var)
+
+
+# =============================================================================
+# 9. RESIDUAL DIAGNOSTICS
+# =============================================================================
+
+fit_uni |> select(arima)  |> gg_tsresiduals() + ggtitle("ARIMA residuals")
+fit_uni |> select(arimax) |> gg_tsresiduals() + ggtitle("ARIMAX residuals")
+
+
+# =============================================================================
+# 10. LJUNG-BOX TEST (white-noise residuals)
+# =============================================================================
+# H0: residuals are white noise. Want p > 0.05 → model captures the structure.
+
+augment(fit_uni) |>
+  features(.innov, ljung_box, lag = 8, dof = 0) |>
+  print()
+
+
+# =============================================================================
+# 11. COMPARE ARIMA vs ARIMAX (in-sample AICc / BIC)
+# =============================================================================
+# Note: AICc/BIC are not directly comparable to the VAR's, since the VAR
+# fits a joint likelihood over (log_price, rate). Out-of-sample RMSE in
+# Step 13 is the apples-to-apples comparison.
+
+glance(fit_uni) |> select(.model, AICc, BIC) |> print()
+
+
+# =============================================================================
+# 12. FORECAST HOLDOUT PERIOD
+# =============================================================================
+# For ARIMAX we supply the observed rate_lag values over the test window
+# (perfect-foresight scenario), to isolate the rate channel's predictive
+# contribution from forecast error in the rate itself.
+
+future_x <- test |>
+  filter(!is.na(rate_lag)) |>
+  select(qtr, rate_lag)
+
+fc_uni <- fit_uni |> forecast(new_data = future_x)
+
+# VAR forecasts price and rate jointly; we feed it the test window length.
+fc_var <- fit_var |> forecast(h = nrow(future_x))
+
+
+# =============================================================================
+# 13. PLOT FORECASTS
+# =============================================================================
+
+fc_uni |>
+  autoplot(filter(train, qtr >= yearquarter("2010 Q1")), level = 80) +
+  autolayer(test, log_price, colour = "black", linetype = "dashed") +
+  labs(title = "Forecasts vs. realised log(Price)",
+       y = "log(DKK/m²)") +
+  facet_wrap(~ .model)
+
+fc_var |>
+  autoplot(filter(train, qtr >= yearquarter("2010 Q1")), level = 80) +
+  autolayer(test, log_price, colour = "black", linetype = "dashed") +
+  labs(title = "VAR forecast vs. realised log(Price)",
+       y = "log(DKK/m²)")
+
+
+# =============================================================================
+# 14. COMPARE FORECAST ACCURACY (RMSE / MAE / MAPE)
+# =============================================================================
+
+acc_uni <- fc_uni |> accuracy(test |> mutate(log_price = log(Price)))
+acc_var <- fc_var |> accuracy(test |> mutate(log_price = log(Price)))
+
+bind_rows(acc_uni, acc_var) |>
+  select(.model, RMSE, MAE, MAPE, MASE) |>
+  arrange(RMSE) |>
+  print()
+
+
+# =============================================================================
+# 15. ARIMAX COEFFICIENTS (for interpretation in the paper)
+# =============================================================================
+
+fit_uni |> select(arimax) |> tidy() |> print()
+
+
+# =============================================================================
+# End of script
+# =============================================================================
