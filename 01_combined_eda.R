@@ -41,7 +41,6 @@ rate_raw <- read_csv("data/bondint_quarterly.csv",
 
 rate <- rate_raw |> filter(qtr %in% price$qtr)
 
-
 # =============================================================================
 # 2. SAMPLE SUMMARY
 # =============================================================================
@@ -87,7 +86,7 @@ ggsave("plots/01-4_acf_rate.png", plot = acf_rate,
 
 
 # =============================================================================
-# 5. SEASONALITY DIAGNOSTICS  (price only — rate has no seasonal hypothesis)
+# 5. SEASONALITY DIAGNOSTICS  (price only)
 # =============================================================================
 
 seasonal_plot_1 <- gg_season(price, Price) + ggtitle("Seasonal plot — by year")
@@ -147,7 +146,6 @@ if (abs(lambda) < 0.001) {
 } else {
   price <- price |> mutate(price_bc = (Price^lambda - 1) / lambda)
 }
-
 
 # =============================================================================
 # 8. UNIT-ROOT TESTS — price (level + diff), then rate (level + diff)
@@ -264,3 +262,6 @@ write_rds(rate,  "data/rate_clean.rds")    # incl. rate_diff
 cat("\n✓ Saved:\n")
 cat("   data/price_clean.rds  (with price_bc and price_bc_diff)\n")
 cat("   data/rate_clean.rds   (with rate_diff)\n")
+
+price
+rate

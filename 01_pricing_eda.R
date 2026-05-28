@@ -12,7 +12,16 @@ library(urca)
 library(scales)
 library(strucchange)
 
-theme_set(theme_minimal(base_size = 12))
+# theme_set(theme_minimal(base_size = 8))
+theme_set(
+  theme_minimal(base_size = 10) + 
+  theme_economist() +
+  theme(
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(face = "bold"),
+    plot.title = element_text(face = "bold")
+  )
+)
 
 # Set working directory. U PROBABLY NEED TO CHANGE DIRECTORY!
 # wd <- "/Users/e/Documents/_UNI/PA_house-price"
