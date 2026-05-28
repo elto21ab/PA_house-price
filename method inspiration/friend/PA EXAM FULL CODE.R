@@ -18,7 +18,7 @@ library(kableExtra)
 library(vars)
 library(dplyr)
 
-
+getwd()
 ### Load data
 data<- read_excel('/Users/camillapedersen/Library/Mobile Documents/com~apple~CloudDocs/CM mat/2.sem/PA/Eksamen/Data til eksamen/KVMPRISER-kopi.xlsx', sheet = 1)
 head(data, 5) 
