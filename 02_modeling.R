@@ -149,20 +149,33 @@ cat("\nBest lag for rate:", best_k, "Q\n")
 # =============================================================================
 # Full AICc grid search (stepwise = FALSE, approximation = FALSE).
 
-train <- train |> mutate(rate_lag = lag(rate, best_k))
-test  <- test  |> mutate(rate_lag = lag(rate, best_k))
+break_date <- yearquarter("2006 Q3")
+
+train <- train |>
+  mutate(rate_lag = lag(rate, best_k),
+         post = if_else(qtr >= break_date, 1L, 0L),
+         rate_lag_post = rate_lag * post)
+
+test  <- test  |>
+  mutate(rate_lag = lag(rate, best_k),
+         post = if_else(qtr >= break_date, 1L, 0L),
+         rate_lag_post = rate_lag * post)
+
 
 fit_uni <- train |>
   filter(!is.na(rate_lag)) |>
   model(
-    arima  = ARIMA(log_price,
-                   stepwise = FALSE, approximation = FALSE),
-    arimax = ARIMA(log_price ~ rate_lag,
-                   stepwise = FALSE, approximation = FALSE)
+    arima        = ARIMA(log_price,
+                         stepwise = FALSE, approximation = FALSE),
+    arimax       = ARIMA(log_price ~ rate_lag,
+                         stepwise = FALSE, approximation = FALSE),
+    arimax_break = ARIMA(log_price ~ rate_lag + post + rate_lag_post,
+                         stepwise = FALSE, approximation = FALSE)
   )
 
 report(fit_uni |> select(arima))
 report(fit_uni |> select(arimax))
+report(fit_uni |> select(arimax_break))
 
 
 # =============================================================================
@@ -186,6 +199,11 @@ ggsave("plots/02-03_ARIMA_residuals.png", plot = ARIMA,
 
 ARIMAX <- fit_uni |> select(arimax) |> gg_tsresiduals() + ggtitle("ARIMAX residuals")
 ggsave("plots/02-04_ARIMAX_residuals.png", plot = ARIMAX,
+       width = 12, height = 8, units = "cm")
+
+ARIMAX_BREAK <- fit_uni |> select(arimax_break) |> gg_tsresiduals() +
+  ggtitle("ARIMAX (break-aware) residuals")
+ggsave("plots/02-05_ARIMAX_break_residuals.png", plot = ARIMAX_BREAK,
        width = 12, height = 8, units = "cm")
 
 
