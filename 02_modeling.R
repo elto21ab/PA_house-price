@@ -16,7 +16,6 @@
 # ── 0.  Packages ────────────────────────────────────────────────────────────
 # install.packages(c("tidyverse","tsibble","fable","fabletools","feasts",
 #                    "urca","strucchange","scales"))
-
 library(tidyverse)
 library(tsibble)
 library(fable)
@@ -33,26 +32,26 @@ lag    <- dplyr::lag
 
 theme_set(theme_minimal(base_size = 12))
 
-
 # =============================================================================
 # 1. LOAD CLEANED DATA AND JOIN
 # =============================================================================
-
 price  <- read_rds("data/price_clean.rds")
 rate   <- read_rds("data/rate_clean.rds")
-lambda <- read_rds("data/lambda.rds")
 
-cat("Loaded Box-Cox λ from EDA:", round(lambda, 4), "\n")
+# lambda <- read_rds("data/lambda.rds")
+# cat("Loaded Box-Cox λ from EDA:", round(lambda, 4), "\n")
 
 df <- inner_join(as_tibble(price), as_tibble(rate), by = "qtr") |>
   arrange(qtr) |>
-  as_tsibble(index = qtr)
+  as_tsibble(index = qtr) |>
+  na.omit()
 
-cat("Joined sample:", format(min(df$qtr)), "to", format(max(df$qtr)),
+cat("Joined sample:", format(min(df$ |>
+  na.omit()qtr)), "to", format(max(df$qtr)), #TODO no need to na.omit() here since we already dropped NAs above
     " (n =", nrow(df), ")\n")
+df
 
-
-# =============================================================================
+# ============================================================================
 # 2. TRAIN / TEST SPLIT (training ≤ 2019 Q4)
 # =============================================================================
 # Everything downstream — Box-Cox λ, lag selection, model fitting — uses
@@ -68,7 +67,6 @@ cat("Train:", format(min(train$qtr)), "to", format(max(train$qtr)),
 cat("Test: ", format(min(test$qtr)),  "to", format(max(test$qtr)),
     " (n =", nrow(test), ")\n")
 
-
 # =============================================================================
 # 3. BUILD log(Price) FOR MODELLING
 # =============================================================================
@@ -77,27 +75,25 @@ cat("Test: ", format(min(test$qtr)),  "to", format(max(test$qtr)),
 # for interpretability — a coefficient on Δlog(Price) reads as a percent
 # change in the original DKK/m² scale.
 
-train <- train |> mutate(log_price = log(Price))
-test  <- test  |> mutate(log_price = log(Price))
-
+# REDUNDANT. USE EXISTING BC INSTEAD OF LOG.
+# train <- train |> mutate(log_price = log(Price))
+# test  <- test  |> mutate(log_price = log(Price))
 
 # =============================================================================
 # 4. CROSS-CORRELATION (CCF) — Δlog(Price) vs. Δrate
 # =============================================================================
 # Visualises the lead-lag relationship. Negative lags = rate leads price.
 
-dlogp <- diff(train$log_price)
-drate <- diff(train$rate)
-
-ccf(drate, dlogp, lag.max = 12,
-    main = "CCF: Δrate (x) vs. Δlog(Price) (y)")
+#actually bc, but easier to not change.
+dlogp <- train$price_bc_diff #diff(train$log_price)
+drate <- train$rate_diff #diff(train$rate)
+log_price <- train$price_bc #later use
 
 png("plots/02-01_ccf_logprice_rate_diff.png",
     width = 12, height = 8, units = "cm", res = 150)
 ccf(drate, dlogp, lag.max = 12,
     main = "CCF: Δrate (x) vs. Δlog(Price) (y)")
 dev.off()
-graphics.off()
 
 # =============================================================================
 # 5. STRUCTURAL BREAK TEST (BIVARIATE QLR / supF)
@@ -105,16 +101,16 @@ graphics.off()
 # Tests for an unknown break in the relationship Δlog(Price)_t = α + β·Δrate_t.
 # This is the substantively interesting break test for our research question.
 
-bp_data <- tibble(dlogp = diff(train$log_price),
-                  drate = diff(train$rate))
+# bp_data <- tibble(dlogp = diff(train$log_price),
+                  # drate = diff(train$rate))
+
+bp_data <- tibble(dlogp, drate)
 
 fs <- Fstats(dlogp ~ drate, data = bp_data, from = 0.15)
-plot(fs, main = "QLR (supF) test — Δlog(Price) ~ Δrate")
 png("plots/02-02_qlr_logprice_rate.png",
     width = 12, height = 8, units = "cm", res = 150)
 plot(fs, main = "QLR (supF) test — Δlog(Price) ~ Δrate")
 dev.off()
-
 
 print(sctest(fs))
 
@@ -133,8 +129,8 @@ lag_grid <- tibble(k = c(0, 1, 2, 4)) |>
   mutate(model = map(k, ~ {
     d <- train |>
       mutate(rate_lag = lag(rate, .x)) |>
-      filter(!is.na(rate_lag))
-    d |> model(ARIMA(log_price ~ rate_lag,
+      filter(!is.na(rate_lag)) # redundant. Happens when loading
+    d |> model(ARIMA(price_bc ~ rate_lag,
                      stepwise = FALSE, approximation = FALSE))
   }),
   AICc = map_dbl(model, ~ glance(.x)$AICc))
@@ -149,33 +145,20 @@ cat("\nBest lag for rate:", best_k, "Q\n")
 # =============================================================================
 # Full AICc grid search (stepwise = FALSE, approximation = FALSE).
 
-break_date <- yearquarter("2006 Q3")
-
-train <- train |>
-  mutate(rate_lag = lag(rate, best_k),
-         post = if_else(qtr >= break_date, 1L, 0L),
-         rate_lag_post = rate_lag * post)
-
-test  <- test  |>
-  mutate(rate_lag = lag(rate, best_k),
-         post = if_else(qtr >= break_date, 1L, 0L),
-         rate_lag_post = rate_lag * post)
-
+train <- train |> mutate(rate_lag = lag(rate, best_k))
+test  <- test  |> mutate(rate_lag = lag(rate, best_k))
 
 fit_uni <- train |>
   filter(!is.na(rate_lag)) |>
   model(
-    arima        = ARIMA(log_price,
-                         stepwise = FALSE, approximation = FALSE),
-    arimax       = ARIMA(log_price ~ rate_lag,
-                         stepwise = FALSE, approximation = FALSE),
-    arimax_break = ARIMA(log_price ~ rate_lag + post + rate_lag_post,
-                         stepwise = FALSE, approximation = FALSE)
+    arima  = ARIMA(price_bc,
+                   stepwise = FALSE, approximation = FALSE),
+    arimax = ARIMA(price_bc ~ rate_lag,
+                   stepwise = FALSE, approximation = FALSE)
   )
 
 report(fit_uni |> select(arima))
 report(fit_uni |> select(arimax))
-report(fit_uni |> select(arimax_break))
 
 
 # =============================================================================
@@ -185,7 +168,7 @@ report(fit_uni |> select(arimax_break))
 # elsewhere) would mask it with the lower-level vars::VAR.
 
 fit_var <- train |>
-  model(var = fable::VAR(vars(log_price, rate), ic = "aicc"))
+  model(var = fable::VAR(vars(price_bc, rate), ic = "aicc"))
 report(fit_var)
 
 
@@ -193,18 +176,15 @@ report(fit_var)
 # 9. RESIDUAL DIAGNOSTICS
 # =============================================================================
 
-ARIMA <- fit_uni |> select(arima)  |> gg_tsresiduals() + ggtitle("ARIMA residuals")
-ggsave("plots/02-03_ARIMA_residuals.png", plot = ARIMA,
-       width = 12, height = 8, units = "cm")
+png("plots/02-03_ARIMA_residuals.png",
+  width = 12, height = 8, units = "cm", res = 150)
+fit_uni |> select(arima) |> gg_tsresiduals() + ggtitle("ARIMA residuals") |> print()
+dev.off()
 
-ARIMAX <- fit_uni |> select(arimax) |> gg_tsresiduals() + ggtitle("ARIMAX residuals")
-ggsave("plots/02-04_ARIMAX_residuals.png", plot = ARIMAX,
-       width = 12, height = 8, units = "cm")
-
-ARIMAX_BREAK <- fit_uni |> select(arimax_break) |> gg_tsresiduals() +
-  ggtitle("ARIMAX (break-aware) residuals")
-ggsave("plots/02-05_ARIMAX_break_residuals.png", plot = ARIMAX_BREAK,
-       width = 12, height = 8, units = "cm")
+png("plots/02-04_ARIMAX_residuals.png",
+  width = 12, height = 8, units = "cm", res = 150)
+fit_uni |> select(arimax) |> gg_tsresiduals() + ggtitle("ARIMAX residuals") |> print()
+dev.off()
 
 
 # =============================================================================
@@ -248,32 +228,36 @@ fc_var <- fit_var |> forecast(h = nrow(future_x))
 # 13. PLOT FORECASTS
 # =============================================================================
 
-fc_uni_plot <- fc_uni |>
+png("plots/02-05_forecast_arima_arimax.png",
+    width = 16, height = 8, units = "cm", res = 150)
+fc_uni |>
   autoplot(filter(train, qtr >= yearquarter("2010 Q1")), level = 80) +
-  autolayer(test, log_price, colour = "black", linetype = "dashed") +
+  autolayer(test, price_bc, colour = "black", linetype = "dashed") +
   labs(title = "Forecasts vs. realised log(Price)",
        y = "log(DKK/m²)") +
-  facet_wrap(~ .model)
-print(fc_uni_plot)
-ggsave("plots/02-05_forecast_arima_arimax.png",
-       plot = fc_uni_plot, width = 16, height = 8, units = "cm")
+  facet_wrap(~ .model) |>
+  print()
+dev.off()
 
-fc_var_plot <- fc_var |>
+png("plots/02-06_forecast_var.png",
+    width = 14, height = 8, units = "cm", res = 150)
+fc_var |>
   autoplot(filter(train, qtr >= yearquarter("2010 Q1")), level = 80) +
-  autolayer(test, log_price, colour = "black", linetype = "dashed") +
+  autolayer(test, price_bc, colour = "black", linetype = "dashed") +
   labs(title = "VAR forecast vs. realised log(Price)",
-       y = "log(DKK/m²)")
-print(fc_var_plot)
-ggsave("plots/02-06_forecast_var.png",
-       plot = fc_var_plot, width = 14, height = 8, units = "cm")
-
+       y = "log(DKK/m²)") |>
+  print()
+dev.off()
 
 # =============================================================================
 # 14. COMPARE FORECAST ACCURACY (RMSE / MAE / MAPE)
 # =============================================================================
-
-acc_uni <- fc_uni |> accuracy(test |> mutate(log_price = log(Price)))
-acc_var <- fc_var |> accuracy(test |> mutate(log_price = log(Price)))
+names(test)
+names(train)
+acc_uni <- fc_uni |> accuracy(test |> select(qtr, price_bc))
+acc_var <- fc_var |>
+  accuracy(test |> select(qtr, price_bc, rate)) |>
+  filter(.type == "price_bc")
 
 bind_rows(acc_uni, acc_var) |>
   select(.model, RMSE, MAE, MAPE, MASE) |>
@@ -286,7 +270,6 @@ bind_rows(acc_uni, acc_var) |>
 # =============================================================================
 
 fit_uni |> select(arimax) |> tidy() |> print()
-
 
 # =============================================================================
 # End of script
