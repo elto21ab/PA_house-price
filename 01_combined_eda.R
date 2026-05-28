@@ -262,6 +262,7 @@ write_rds(rate,  "data/rate_clean.rds")    # incl. rate_diff
 cat("\n✓ Saved:\n")
 cat("   data/price_clean.rds  (with price_bc and price_bc_diff)\n")
 cat("   data/rate_clean.rds   (with rate_diff)\n")
+cat("   data/lambda.rds       (Box-Cox λ =", round(lambda, 4), ")\n")
 
 price
 rate
