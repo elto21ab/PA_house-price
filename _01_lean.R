@@ -108,6 +108,12 @@ cat("Box-Cox λ (Guerrero):", round(lambda, 4), "\n")
 #     KPSS_mu   = round(kpss_mu@teststat, 3)
 #   )
 # }
+# 5% critical values:
+#   ADF_trend  : -3.43
+#   ADF_drift  : -2.89
+#   ADF_none   : -1.95
+#   KPSS_tau   :  0.146
+#   KPSS_mu    :  0.463
 ur_tidy <- function(x, label) {
   adf_trend <- ur.df(x, type = "trend", selectlags = "AIC")
   kpss_tau  <- ur.kpss(x, type = "tau")
