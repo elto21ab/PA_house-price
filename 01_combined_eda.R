@@ -258,6 +258,7 @@ ggsave("plots/01-13_pacf_rate_diff.png", plot = pacf_rate_diff,
 if (!dir.exists("data")) dir.create("data")
 write_rds(price, "data/price_clean.rds")   # incl. price_bc and price_bc_diff
 write_rds(rate,  "data/rate_clean.rds")    # incl. rate_diff
+write_rds(lambda, "data/lambda.rds")       # Box-Cox λ
 
 cat("\n✓ Saved:\n")
 cat("   data/price_clean.rds  (with price_bc and price_bc_diff)\n")
