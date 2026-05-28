@@ -92,6 +92,12 @@ drate <- diff(train$rate)
 ccf(drate, dlogp, lag.max = 12,
     main = "CCF: Δrate (x) vs. Δlog(Price) (y)")
 
+png("plots/02-01_ccf_logprice_rate_diff.png",
+    width = 12, height = 8, units = "cm", res = 150)
+ccf(drate, dlogp, lag.max = 12,
+    main = "CCF: Δrate (x) vs. Δlog(Price) (y)")
+dev.off()
+graphics.off()
 
 # =============================================================================
 # 5. STRUCTURAL BREAK TEST (BIVARIATE QLR / supF)
@@ -104,6 +110,12 @@ bp_data <- tibble(dlogp = diff(train$log_price),
 
 fs <- Fstats(dlogp ~ drate, data = bp_data, from = 0.15)
 plot(fs, main = "QLR (supF) test — Δlog(Price) ~ Δrate")
+png("plots/02-02_qlr_logprice_rate.png",
+    width = 12, height = 8, units = "cm", res = 150)
+plot(fs, main = "QLR (supF) test — Δlog(Price) ~ Δrate")
+dev.off()
+
+
 print(sctest(fs))
 
 break_idx  <- which.max(fs$Fstats) + floor(0.15 * nrow(bp_data))
@@ -168,8 +180,13 @@ report(fit_var)
 # 9. RESIDUAL DIAGNOSTICS
 # =============================================================================
 
-fit_uni |> select(arima)  |> gg_tsresiduals() + ggtitle("ARIMA residuals")
-fit_uni |> select(arimax) |> gg_tsresiduals() + ggtitle("ARIMAX residuals")
+ARIMA <- fit_uni |> select(arima)  |> gg_tsresiduals() + ggtitle("ARIMA residuals")
+ggsave("plots/02-03_ARIMA_residuals.png", plot = ARIMA,
+       width = 12, height = 8, units = "cm")
+
+ARIMAX <- fit_uni |> select(arimax) |> gg_tsresiduals() + ggtitle("ARIMAX residuals")
+ggsave("plots/02-04_ARIMAX_residuals.png", plot = ARIMAX,
+       width = 12, height = 8, units = "cm")
 
 
 # =============================================================================
@@ -213,18 +230,24 @@ fc_var <- fit_var |> forecast(h = nrow(future_x))
 # 13. PLOT FORECASTS
 # =============================================================================
 
-fc_uni |>
+fc_uni_plot <- fc_uni |>
   autoplot(filter(train, qtr >= yearquarter("2010 Q1")), level = 80) +
   autolayer(test, log_price, colour = "black", linetype = "dashed") +
   labs(title = "Forecasts vs. realised log(Price)",
        y = "log(DKK/m²)") +
   facet_wrap(~ .model)
+print(fc_uni_plot)
+ggsave("plots/02-05_forecast_arima_arimax.png",
+       plot = fc_uni_plot, width = 16, height = 8, units = "cm")
 
-fc_var |>
+fc_var_plot <- fc_var |>
   autoplot(filter(train, qtr >= yearquarter("2010 Q1")), level = 80) +
   autolayer(test, log_price, colour = "black", linetype = "dashed") +
   labs(title = "VAR forecast vs. realised log(Price)",
        y = "log(DKK/m²)")
+print(fc_var_plot)
+ggsave("plots/02-06_forecast_var.png",
+       plot = fc_var_plot, width = 14, height = 8, units = "cm")
 
 
 # =============================================================================
