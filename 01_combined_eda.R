@@ -1,6 +1,6 @@
 # =============================================================================
 # 01_combined_eda.R — Exploratory data analysis for both series
-# Predictive Analytics, CBS
+# Predictive Analytics, CBS 
 # =============================================================================
 # Steps are organised by analytical step rather than by variable, so the same
 # step on price and rate appears right after each other. Uses the full sample.
