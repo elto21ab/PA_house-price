@@ -137,6 +137,8 @@ print(ur_tbl)
 # rate_level: ADF_trend −1.80 not enough; KPSS_tau 0.253 > ~0.146. ⇒ Non‑stationary.
 # rate_diff1: ADF_trend −7.25 strong reject; KPSS_tau 0.06 < ~0.146. ⇒ Stationary.
 
+
+
 ######################
 # STRUCTURAL BREAK TEST (QLR / supF) — price-only AR(1) dynamics
 
@@ -195,14 +197,17 @@ cat("Box-Cox λ (train):", round(lambda_train, 4), "\n")
 train <- train |>
   mutate(
     price_bc = forecast::BoxCox(Price, lambda_train),
-    price_bc_d = difference(price_bc)
+    price_bc_d = difference(price_bc),
+    rate_d = difference(rate)
   )
 
 test <- test |>
   mutate(
     price_bc = forecast::BoxCox(Price, lambda_train),
-    price_bc_d = difference(price_bc)
+    price_bc_d = difference(price_bc),
+    rate_d = difference(rate)
   )
+
 
 # ACF & PACF OF DIFFERENCED SERIES — price, then rate
 # These guide ARIMA(p, d, q) order identification in the modelling file.
