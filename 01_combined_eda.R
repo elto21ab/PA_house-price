@@ -39,7 +39,7 @@ rate_raw <- read_csv("data/bondint_quarterly.csv",
   arrange(qtr) |>
   as_tsibble(index = qtr)
 
-rate <- rate_raw |> filter(qtr %in% price$qtr)
+rate <- rate_raw |> filter(qtr %in% price$qtr) #half-assed inner join
 
 # =============================================================================
 # 2. SAMPLE SUMMARY
@@ -174,7 +174,6 @@ ur_tbl <- bind_rows(
   ur_tidy(as.ts(na.omit(diff(rate$rate))),          "rate_diff1")
 )
 print(ur_tbl)
-
 
 # =============================================================================
 # 9. FIRST DIFFERENCES  (price_bc and rate)

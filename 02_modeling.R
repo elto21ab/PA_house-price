@@ -38,8 +38,8 @@ theme_set(theme_minimal(base_size = 12))
 price  <- read_rds("data/price_clean.rds")
 rate   <- read_rds("data/rate_clean.rds")
 
-# lambda <- read_rds("data/lambda.rds")
-# cat("Loaded Box-Cox λ from EDA:", round(lambda, 4), "\n")
+lambda <- read_rds("data/lambda.rds")
+cat("Loaded Box-Cox λ from EDA:", round(lambda, 4), "\n")
 
 df <- inner_join(as_tibble(price), as_tibble(rate), by = "qtr") |>
   arrange(qtr) |>
