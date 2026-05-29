@@ -62,17 +62,6 @@ rate_level_plot <- ggplot(rate, aes(qtr, rate)) +
 ggsave("plots/01-2_rate_level.png", plot = rate_level_plot,
        width = 14, height = 8, units = "cm")
 
-# PLOT 3-4: CORRELOGRAM (ACF)
-acf_price <- price |> ACF(Price) |> autoplot() +
-  ggtitle("ACF: Price")
-ggsave("plots/01-3_acf_price.png", plot = acf_price,
-       width = 12, height = 8, units = "cm")
-
-acf_rate <- rate |> ACF(rate) |> autoplot() +
-  ggtitle("ACF: Rate")
-ggsave("plots/01-4_acf_rate.png", plot = acf_rate,
-       width = 12, height = 8, units = "cm")
-       
 # PLOT 5-7: SEASONALITY DIAGNOSTICS
 seasonal_plot_1 <- gg_season(price, Price) + ggtitle("Seasonal plot - by year")
 ggsave("plots/01-5_seasonal_year.png", plot = seasonal_plot_1,
@@ -145,6 +134,25 @@ test <- test |>
     price_bc_d = difference(price_bc),
     rate_d = difference(rate)
   )
+
+# --- [CHANGED: ACF/PACF Diagnostics on Stationary Training Data] ---
+# To identify ARIMA orders without data leakage, we construct ACF and PACF plots 
+# on the stationary (Box-Cox transformed and differenced) training data.
+acf_price_diff <- train |>
+  filter(!is.na(price_bc_d)) |>
+  ACF(price_bc_d, lag_max = 24) |>
+  autoplot() +
+  labs(title = "ACF: diff(price_bc)", x = "Lag", y = "ACF")
+ggsave("plots/01-3_acf_price_diff.png", plot = acf_price_diff,
+       width = 12, height = 8, units = "cm")
+
+pacf_price_diff <- train |>
+  filter(!is.na(price_bc_d)) |>
+  PACF(price_bc_d, lag_max = 24) |>
+  autoplot() +
+  labs(title = "PACF: diff(price_bc)", x = "Lag", y = "PACF")
+ggsave("plots/01-4_pacf_price_diff.png", plot = pacf_price_diff,
+       width = 12, height = 8, units = "cm")
 
 # =============================================================================
 # SECTION 5: STATIONARITY / UNIT-ROOT TESTS
@@ -281,6 +289,9 @@ fit_arimax_lag <- train |> drop_na(rate_lag) |> model(arimax_lag = ARIMA(price_b
 report(fit_arima)
 report(fit_arimax)
 report(fit_arimax_lag)
+
+fit_arimax
+fit_arima
 
 fc_arima <- forecast(fit_arima, new_data = test)
 fc_arimax <- forecast(fit_arimax, new_data = test)
