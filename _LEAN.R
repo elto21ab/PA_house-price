@@ -74,11 +74,11 @@ ggsave("plots/01-4_acf_rate.png", plot = acf_rate,
        width = 12, height = 8, units = "cm")
        
 # PLOT 5-7: SEASONALITY DIAGNOSTICS
-seasonal_plot_1 <- gg_season(price, Price) + ggtitle("Seasonal plot — by year")
+seasonal_plot_1 <- gg_season(price, Price) + ggtitle("Seasonal plot - by year")
 ggsave("plots/01-5_seasonal_year.png", plot = seasonal_plot_1,
        width = 12, height = 8, units = "cm")
 
-seasonal_plot_2 <- gg_subseries(price, Price) + ggtitle("Seasonal subseries — by quarter")
+seasonal_plot_2 <- gg_subseries(price, Price) + ggtitle("Seasonal subseries - by quarter")
 ggsave("plots/01-6_seasonal_quarter.png", plot = seasonal_plot_2,
        width = 12, height = 8, units = "cm")
 
@@ -184,7 +184,7 @@ ccf_data <- train |>
 png("plots/02-01_ccf_price_bc_d_rate_d.png",
 		width = 12, height = 8, units = "cm", res = 150)
 ccf(ccf_data$rate_d, ccf_data$price_bc_d, lag.max = 12,
-		main = "CCF: Δrate (x) vs. Δprice_bc (y)")
+		main = "CCF: diff(rate) (x) vs. diff(price_bc) (y)")
 dev.off()
 
 # --- [CHANGED: Dynamic Exogenous Lag Selection from 02_modeling.R] ---
@@ -359,7 +359,8 @@ dev.off()
 png("plots/02-07_forecast_var.png", width = 14, height = 8, units = "cm", res = 150)
 fc_var |>
   autoplot(filter(train, qtr >= yearquarter("2010 Q1")), level = 80) +
-  autolayer(test, price_bc, colour = "black", linetype = "dashed") +
+  geom_line(data = test |> pivot_longer(cols = c(price_bc, rate), names_to = ".response", values_to = "value"),
+            aes(y = value), colour = "black", linetype = "dashed") +
   labs(title = "VAR forecast vs. realised log(Price)",
        y = "log(DKK/m²)") |>
   print()
