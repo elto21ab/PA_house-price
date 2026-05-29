@@ -23,48 +23,11 @@ test   <- read_rds("data/test.rds")
 #test <- test |>
 #	mutate(rate_d = difference(rate))
 
-
 train
 test
 
 cat("Train sample:", format(min(train$qtr)), "to", format(max(train$qtr)), " (n =", nrow(train), ")\n")
 cat("Test sample:", format(min(test$qtr)), "to", format(max(test$qtr)), " (n =", nrow(test), ")\n")
-
-# =============================================================================
-# Unit-root tests on training data (ADF + KPSS)
-# =============================================================================
-# ADF (H0: unit root)        → reject (small p) means stationary
-# KPSS (H0: stationarity)    → reject (large stat) means unit root
-# 5% critical values:
-#   ADF_trend  : -3.43
-#   ADF_drift  : -2.89
-#   ADF_none   : -1.95
-#   KPSS_tau   :  0.146
-#   KPSS_mu    :  0.463
-
-ur_tidy <- function(x, label) {
-  adf_trend <- ur.df(x, type = "trend", selectlags = "AIC")
-  adf_drift <- ur.df(x, type = "drift", selectlags = "AIC")
-  adf_none  <- ur.df(x, type = "none",  selectlags = "AIC")
-  kpss_tau  <- ur.kpss(x, type = "tau")
-  kpss_mu   <- ur.kpss(x, type = "mu")
-  tibble(
-    series    = label,
-    ADF_trend = round(adf_trend@teststat[1], 3),
-    ADF_drift = round(adf_drift@teststat[1], 3),
-    ADF_none  = round(adf_none@teststat[1], 3),
-    KPSS_tau  = round(kpss_tau@teststat, 3),
-    KPSS_mu   = round(kpss_mu@teststat, 3)
-  )
-}
-
-ur_tbl <- bind_rows(
-  ur_tidy(as.ts(train$price_bc),              "price_bc_level"),
-  ur_tidy(as.ts(na.omit(train$price_bc_d)),   "price_bc_diff"),
-  ur_tidy(as.ts(train$rate),                  "rate_level"),
-  ur_tidy(as.ts(na.omit(train$rate_d)),       "rate_diff")
-)
-print(ur_tbl)
 
 # =============================================================================
 # CCF: Δrate (x) vs. Δprice (y). Negative lags = rate leads price.

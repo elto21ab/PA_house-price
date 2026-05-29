@@ -92,22 +92,11 @@ lambda <- price |>
 cat("Box-Cox λ (Guerrero):", round(lambda, 4), "\n")
 # RESULT: λ ≈ -0.148 → JUST USE REGULAR LOG
 
-# UNIT-ROOT TESTS — price (level + diff), then rate (level + diff)
-# ur_tidy <- function(x, label) {
-#   adf_trend <- ur.df(x, type = "trend", selectlags = "AIC")
-#   adf_drift <- ur.df(x, type = "drift", selectlags = "AIC")
-#   adf_none  <- ur.df(x, type = "none",  selectlags = "AIC")
-#   kpss_tau  <- ur.kpss(x, type = "tau")
-#   kpss_mu   <- ur.kpss(x, type = "mu")
-#   tibble(
-#     series    = label,
-#     ADF_trend = round(adf_trend@teststat[1], 3),
-#     ADF_drift = round(adf_drift@teststat[1], 3),
-#     ADF_none  = round(adf_none@teststat[1], 3),
-#     KPSS_tau  = round(kpss_tau@teststat, 3),
-#     KPSS_mu   = round(kpss_mu@teststat, 3)
-#   )
-# }
+# =============================================================================
+# Unit-root tests on training data (ADF + KPSS)
+# =============================================================================
+# ADF (H0: unit root)        → reject (small p) means stationary
+# KPSS (H0: stationarity)    → reject (large stat) means unit root
 # 5% critical values:
 #   ADF_trend  : -3.43
 #   ADF_drift  : -2.89
@@ -142,8 +131,6 @@ print(ur_tbl)
     # KPSS_tau 0.098 < ~0.146 → fail to reject stationarity. ⇒ Stationary.
 # rate_level: ADF_trend −1.80 not enough; KPSS_tau 0.253 > ~0.146. ⇒ Non‑stationary.
 # rate_diff1: ADF_trend −7.25 strong reject; KPSS_tau 0.06 < ~0.146. ⇒ Stationary.
-
-
 
 ######################
 # STRUCTURAL BREAK TEST (QLR / supF) — price-only AR(1) dynamics

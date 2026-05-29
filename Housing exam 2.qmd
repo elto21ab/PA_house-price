@@ -1,0 +1,546 @@
+---
+title: "Housing exam 2"
+format:
+  html:
+    execute:
+    warning: false
+    message: false
+---
+
+```{r}
+library(tidyverse)
+library(tsibble)
+library(fable)
+library(fabletools)
+library(feasts)
+library(urca)
+library(strucchange)
+library(scales)
+requireNamespace("vars", quietly = TRUE)
+library(knitr)
+library(kableExtra)
+library(gridExtra)
+library(grid)
+```
+
+```{r}
+price_raw <- read_csv("data/kbh_quarter_sqm_price.csv")
+rate_raw  <- read_csv("data/bondInt_quarterly.csv")
+
+price <- price_raw |>
+  mutate(
+    qtr = yearquarter(str_replace(Quarter, "K", " Q")),
+    Price = as.numeric(Price)
+  ) |>
+  select(qtr, Price) |>
+  arrange(qtr) |>
+  as_tsibble(index = qtr)
+
+rate <- rate_raw |>
+  mutate(
+    qtr = yearquarter(str_replace(Quarter, "K", " Q")),
+    rate = as.numeric(mean_rate)
+  ) |>
+  select(qtr, rate) |>
+  arrange(qtr) |>
+  as_tsibble(index = qtr)
+
+df_raw <- inner_join(price, rate, by = "qtr") |>
+  arrange(qtr) |>
+  as_tsibble(index = qtr)
+
+cat("Joined sample:", format(min(df_raw$qtr)), "to", format(max(df_raw$qtr)),
+    " (n =", nrow(df_raw), ")\n")
+```
+
+```{r}
+df_raw |>
+  autoplot(Price) +
+  labs(
+    title = "Copenhagen housing prices",
+    x = "Quarter",
+    y = "Price per square metre"
+  )
+```
+
+```{r}
+df_raw |>
+  autoplot(rate) +
+  labs(
+    title = "Long-term mortgage bond yield",
+    x = "Quarter",
+    y = "Bond yield"
+  )
+```
+
+
+
+```{r}
+df_model_raw <- df_raw |>
+  mutate(
+    rate_lag2 = dplyr::lag(rate, 2)
+  ) |>
+  drop_na(rate_lag2)
+```
+
+
+```{r}
+n_test <- floor(nrow(df_model_raw) * 0.20)
+
+train_raw <- df_model_raw |>
+  slice_head(n = nrow(df_model_raw) - n_test)
+
+test_raw <- df_model_raw |>
+  slice_tail(n = n_test)
+
+lambda_train <- train_raw |>
+  features(Price, guerrero) |>
+  pull(lambda_guerrero)
+
+cat("Box-Cox lambda estimated on training data:", round(lambda_train, 4), "\n")
+```
+
+```{r}
+df_model <- df_model_raw |>
+  mutate(
+    price_bc = box_cox(Price, lambda_train),
+    price_bc_diff = difference(price_bc),
+    rate_diff = difference(rate)
+  )
+
+train <- df_model |>
+  slice_head(n = nrow(df_model) - n_test)
+
+test <- df_model |>
+  slice_tail(n = n_test)
+```
+
+```{r}
+cat("Test rows:", nrow(test), "\n")
+cat("NA in price_bc:", sum(is.na(test$price_bc)), "\n")
+cat("NA in price_bc_diff:", sum(is.na(test$price_bc_diff)), "\n")
+cat("NA in rate_lag2:", sum(is.na(test$rate_lag2)), "\n")
+```
+
+```{r}
+# STL decomposition of Box-Cox transformed housing prices
+
+decomp_price <- train |>
+  model(
+    stl = STL(
+      price_bc ~ trend(window = 7) + season(window = "periodic"),
+      robust = TRUE
+    )
+  )
+
+components(decomp_price) |>
+  autoplot() +
+  labs(
+    title = "STL decomposition of Box-Cox transformed housing prices",
+    subtitle = "Decomposition based on the training period",
+    x = "Quarter"
+  )
+```
+
+```{r}
+stationarity_table <- tibble(
+  Series = c(
+    "Housing price, Box-Cox level",
+    "Housing price, Box-Cox difference",
+    "Bond yield, level",
+    "Bond yield, difference"
+  ),
+  variable = c("price_bc", "price_bc_diff", "rate", "rate_diff")
+) |>
+  mutate(
+    data = map(variable, ~ {
+      if (.x == "price_bc") {
+        train$price_bc
+      } else if (.x == "price_bc_diff") {
+        train |> filter(!is.na(price_bc_diff)) |> pull(price_bc_diff)
+      } else if (.x == "rate") {
+        train$rate
+      } else {
+        train |> filter(!is.na(rate_diff)) |> pull(rate_diff)
+      }
+    }),
+
+    adf_model = map(data, ~ ur.df(.x, type = "drift", selectlags = "AIC")),
+    ADF_stat = map_dbl(adf_model, ~ .x@teststat[1]),
+    ADF_crit_5pct = map_dbl(adf_model, ~ .x@cval[1, "5pct"]),
+
+    kpss_model = map(data, ~ ur.kpss(.x, type = "mu")),
+    KPSS_stat = map_dbl(kpss_model, ~ .x@teststat),
+
+    # KPSS 5% critical value for type = "mu"
+    KPSS_crit_5pct = 0.463,
+
+    ADF_stationary = ADF_stat < ADF_crit_5pct,
+    KPSS_stationary = KPSS_stat < KPSS_crit_5pct,
+
+    Stationary = if_else(ADF_stationary & KPSS_stationary, "Yes", "No")
+  ) |>
+  select(Series, ADF_stat, KPSS_stat, Stationary) |>
+  mutate(
+    ADF_stat = round(ADF_stat, 3),
+    KPSS_stat = round(KPSS_stat, 3)
+  )
+
+stationarity_table_plot <- stationarity_table |>
+  rename(
+    `ADF stat` = ADF_stat,
+    `KPSS stat` = KPSS_stat
+  )
+
+gridExtra::grid.table(
+  stationarity_table_plot,
+  rows = NULL
+)
+```
+
+
+
+```{r}
+train |>
+  features(price_bc, unitroot_kpss)
+
+train |>
+  filter(!is.na(price_bc_diff)) |>
+  features(price_bc_diff, unitroot_kpss)
+
+train |>
+  features(rate, unitroot_kpss)
+
+train |>
+  filter(!is.na(rate_diff)) |>
+  features(rate_diff, unitroot_kpss)
+```
+
+```{r}
+train |>
+  features(price_bc, unitroot_ndiffs)
+
+train |>
+  features(rate, unitroot_ndiffs)
+```
+```{r}
+adf_results <- tibble(
+  series = c("price_bc", "price_bc_diff", "rate", "rate_diff"),
+  adf_stat = c(
+    ur.df(train$price_bc, type = "drift", selectlags = "AIC")@teststat[1],
+    ur.df(train |> filter(!is.na(price_bc_diff)) |> pull(price_bc_diff),
+          type = "drift", selectlags = "AIC")@teststat[1],
+    ur.df(train$rate, type = "drift", selectlags = "AIC")@teststat[1],
+    ur.df(train |> filter(!is.na(rate_diff)) |> pull(rate_diff),
+          type = "drift", selectlags = "AIC")@teststat[1]
+  ),
+  critical_5pct = c(
+    ur.df(train$price_bc, type = "drift", selectlags = "AIC")@cval[1, "5pct"],
+    ur.df(train |> filter(!is.na(price_bc_diff)) |> pull(price_bc_diff),
+          type = "drift", selectlags = "AIC")@cval[1, "5pct"],
+    ur.df(train$rate, type = "drift", selectlags = "AIC")@cval[1, "5pct"],
+    ur.df(train |> filter(!is.na(rate_diff)) |> pull(rate_diff),
+          type = "drift", selectlags = "AIC")@cval[1, "5pct"]
+  )
+) |>
+  mutate(
+    stationary_adf = if_else(adf_stat < critical_5pct, "Yes", "No")
+  )
+
+adf_results
+```
+
+
+```{r}
+train |>
+  filter(!is.na(price_bc_diff)) |>
+  ACF(price_bc_diff) |>
+  autoplot() +
+  labs(
+    title = "ACF of differenced Box-Cox transformed housing prices",
+    x = "Lag",
+    y = "ACF"
+  )
+```
+
+```{r}
+train |>
+  filter(!is.na(price_bc_diff)) |>
+  PACF(price_bc_diff) |>
+  autoplot() +
+  labs(
+    title = "PACF of differenced Box-Cox transformed housing prices",
+    x = "Lag",
+    y = "PACF"
+  )
+```
+
+```{r}
+train |>
+  filter(!is.na(price_bc_diff), !is.na(rate_diff)) |>
+  CCF(price_bc_diff, rate_diff, lag_max = 8) |>
+  autoplot() +
+  labs(
+    title = "CCF between housing price changes and bond yield changes",
+    x = "Lag",
+    y = "Cross-correlation"
+  )
+```
+
+```{r}
+fit_models <- train |>
+  model(
+    arima = ARIMA(price_bc),
+    arimax = ARIMA(price_bc ~ rate),
+    arimax_lag2 = ARIMA(price_bc ~ rate_lag2)
+  )
+
+report(fit_models)
+```
+
+```{r}
+fc_models <- fit_models |>
+  forecast(new_data = test)
+
+fc_models
+
+
+accuracy_models_clean <- accuracy(fc_models, test) |>
+  select(.model, RMSE, MAE, MAPE, ACF1) |>
+  arrange(RMSE)
+
+accuracy_models_clean
+```
+
+```{r}
+fc_models |>
+  autoplot(df_model) +
+  labs(
+    title = "Forecast comparison: ARIMA vs ARIMAX models",
+    x = "Quarter",
+    y = "Box-Cox transformed housing price"
+  )
+```
+
+```{r}
+fc_models |>
+  autoplot(df_model |> filter(qtr >= yearquarter("2018 Q1"))) +
+  labs(
+    title = "Forecast comparison on test period",
+    x = "Quarter",
+    y = "Box-Cox transformed housing price"
+  )
+```
+
+```{r}
+fit_models |>
+  select(arima) |>
+  gg_tsresiduals()
+```
+
+```{r}
+fit_models |>
+  select(arimax) |>
+  gg_tsresiduals()
+```
+
+```{r}
+fit_models |>
+  select(arimax_lag2) |>
+  gg_tsresiduals()
+```
+
+```{r}
+fit_models |>
+  augment() |>
+  features(.innov, ljung_box, lag = 8, dof = 0)
+```
+
+
+```{r}
+var_data <- train |>
+  filter(!is.na(price_bc_diff), !is.na(rate_diff)) |>
+  as_tibble() |>
+  select(price_bc_diff, rate_diff)
+```
+
+```{r}
+lag_select <- vars::VARselect(var_data, lag.max = 8, type = "const")
+lag_select$selection 
+
+```
+
+```{r}
+p_opt <- lag_select$selection["SC(n)"]
+
+fit_var <- vars::VAR(var_data, p = p_opt, type = "const")
+summary(fit_var)
+
+```
+
+```{r}
+vars::serial.test(fit_var, lags.pt = 8, type = "PT.asymptotic")
+
+var_forecast <- predict(fit_var, n.ahead = nrow(test))
+
+price_diff_fc <- var_forecast$fcst$price_bc_diff[, "fcst"]
+```
+
+```{r}
+last_train_price <- tail(train$price_bc, 1)
+price_bc_fc <- cumsum(c(last_train_price, price_diff_fc))[-1]
+
+```
+
+```{r}
+var_accuracy <- tibble(
+  .model = "var",
+  RMSE = sqrt(mean((price_bc_fc - test$price_bc)^2)),
+  MAE  = mean(abs(price_bc_fc - test$price_bc)),
+  MAPE = mean(abs((price_bc_fc - test$price_bc) / test$price_bc)) * 100
+)
+
+bind_rows(accuracy_models_clean, var_accuracy) |>
+  arrange(RMSE)
+```
+
+```{r}
+tibble(
+  qtr = test$qtr,
+  actual = test$price_bc,
+  var_fc = price_bc_fc
+) |>
+  ggplot(aes(x = qtr)) +
+  geom_line(aes(y = actual), colour = "black") +
+  geom_line(aes(y = var_fc), colour = "steelblue", linetype = "dashed") +
+  labs(
+    title = "VAR forecast vs actual (test period)",
+    x = "Quarter",
+    y = "Box-Cox transformed housing price"
+  )
+```
+
+
+```{r}
+# Forecast from VAR model
+fc_var <- predict(fit_var, n.ahead = nrow(test), ci = 0.95)
+
+# Extract forecasted changes in transformed housing prices
+point_fc <- fc_var$fcst$price_bc_diff[, "fcst"]
+lower_95 <- fc_var$fcst$price_bc_diff[, "lower"]
+upper_95 <- fc_var$fcst$price_bc_diff[, "upper"]
+
+# Approximate 80% interval from the 95% interval
+se <- (upper_95 - point_fc) / 1.96
+lower_80 <- point_fc - 1.28 * se
+upper_80 <- point_fc + 1.28 * se
+
+# Last observed transformed housing price in training data
+last_train_price <- train |>
+  slice_tail(n = 1) |>
+  pull(price_bc)
+
+# Reconstruct forecasts from differences back to transformed price level
+df_var_forecast <- tibble(
+  qtr = test$qtr,
+  model = "VAR",
+  value = cumsum(c(last_train_price, point_fc))[-1],
+  lower_80 = cumsum(c(last_train_price, lower_80))[-1],
+  upper_80 = cumsum(c(last_train_price, upper_80))[-1],
+  lower_95 = cumsum(c(last_train_price, lower_95))[-1],
+  upper_95 = cumsum(c(last_train_price, upper_95))[-1]
+)
+
+# Full historical actual series, not just from 2015
+df_actual <- df_model |>
+  select(qtr, value = price_bc)
+
+# Plot like S152986
+ggplot() +
+  geom_line(
+    data = df_actual,
+    aes(x = qtr, y = value, colour = "Actual"),
+    linewidth = 0.6
+  ) +
+  geom_ribbon(
+    data = df_var_forecast,
+    aes(x = qtr, ymin = lower_95, ymax = upper_95, fill = "VAR 95%"),
+    alpha = 0.20
+  ) +
+  geom_ribbon(
+    data = df_var_forecast,
+    aes(x = qtr, ymin = lower_80, ymax = upper_80, fill = "VAR 80%"),
+    alpha = 0.40
+  ) +
+  geom_line(
+    data = df_var_forecast,
+    aes(x = qtr, y = value, colour = "VAR forecast"),
+    linewidth = 0.7
+  ) +
+  scale_colour_manual(
+    name = "Series",
+    values = c(
+      "Actual" = "black",
+      "VAR forecast" = "blue"
+    )
+  ) +
+  scale_fill_manual(
+    name = "Prediction interval",
+    values = c(
+      "VAR 95%" = "blue",
+      "VAR 80%" = "blue"
+    )
+  ) +
+  labs(
+    title = "VAR forecast of transformed housing prices",
+    x = "Quarter",
+    y = "Box-Cox transformed housing price"
+  ) +
+  theme_minimal()
+```
+
+
+
+```{r}
+qlr_df <- train |>
+  filter(!is.na(price_bc_diff), !is.na(rate_diff)) |>
+  as_tibble()
+
+qlr <- Fstats(price_bc_diff ~ rate_diff, data = qlr_df)
+
+plot(qlr,
+     main = "QLR Test: F-statistics across candidate breakpoints",
+     xlab = "Quarter")
+
+breakpoints(qlr)
+
+sctest(qlr)
+```
+
+```{r}
+bp <- breakpoints(qlr)
+print(bp)
+
+qlr_df[bp$breakpoints, "qtr"]
+
+break_qtr <- qlr_df[bp$breakpoints, "qtr"] |> pull(qtr)
+
+train_pre  <- train |> filter(qtr <= break_qtr)
+train_post <- train |> filter(qtr >  break_qtr)
+
+
+fit_pre <- train_pre |>
+  model(arimax_lag2 = ARIMA(price_bc ~ rate_lag2))
+
+report(fit_pre)
+
+
+fit_pre |>
+  augment() |>
+  features(.innov, ljung_box, lag = 8, dof = 0)
+```
+
+
+
+
+
