@@ -69,6 +69,10 @@ test_lag <- test |>
 
 df_model <- bind_rows(train, test)
 
+# =============================================================================
+# ARIMA and ARIMAX models
+# =============================================================================
+
 fit_arima <- train |> model(arima = ARIMA(price_bc))
 fit_arimax <- train |> model(arimax = ARIMA(price_bc ~ rate))
 fit_arimax_lag <- train_lag |> model(arimax_lag = ARIMA(price_bc ~ rate_lag))
@@ -139,3 +143,73 @@ augment(fit_arimax_lag) |>
 	features(.innov, ljung_box, lag = 8, dof = 1)
 
 
+# =============================================================================
+# VAR model (bivariate: differenced price_bc and differenced rate)
+# =============================================================================
+# Uses vars::VAR. Both series are I(1), so we fit the VAR on the first
+# differences. Lag order is selected by SC (BIC).
+
+# Build the VAR dataset (differenced series, no NAs)
+var_data <- train |>
+	filter(!is.na(price_bc_d), !is.na(rate_d)) |>
+	as_tibble() |>
+	select(price_bc_d, rate_d)
+
+# --- VAR lag selection ---
+lag_select <- vars::VARselect(var_data, lag.max = 8, type = "const")
+print(lag_select$selection)
+
+p_opt <- lag_select$selection["SC(n)"]
+cat("\nSelected VAR lag order (SC):", p_opt, "\n")
+
+# --- Fit the VAR ---
+fit_var <- vars::VAR(var_data, p = p_opt, type = "const")
+summary(fit_var)
+
+# --- Residual diagnostics (Portmanteau / serial correlation test) ---
+vars::serial.test(fit_var, lags.pt = 8, type = "PT.asymptotic")
+
+# --- Forecast the test period ---
+var_forecast <- predict(fit_var, n.ahead = nrow(test))
+
+# Forecast is in DIFFERENCES; reconstruct the level by cumulative sum
+# starting from the last observed train price
+price_diff_fc <- var_forecast$fcst$price_bc_d[, "fcst"]
+last_train_price <- tail(train$price_bc, 1)
+price_bc_fc <- cumsum(c(last_train_price, price_diff_fc))[-1]
+
+# --- VAR accuracy and joint comparison table ---
+var_accuracy <- tibble(
+	.model = "var",
+	RMSE = sqrt(mean((price_bc_fc - test$price_bc)^2)),
+	MAE  = mean(abs(price_bc_fc - test$price_bc)),
+	MAPE = mean(abs((price_bc_fc - test$price_bc) / test$price_bc)) * 100
+)
+
+accuracy_all <- bind_rows(accuracy_models_clean, var_accuracy) |>
+	arrange(RMSE)
+
+print(accuracy_all)
+
+# --- VAR forecast plot ---
+var_plot <- tibble(
+	qtr    = test$qtr,
+	actual = test$price_bc,
+	var_fc = price_bc_fc
+) |>
+	ggplot(aes(x = qtr)) +
+	geom_line(aes(y = actual), colour = "black") +
+	geom_line(aes(y = var_fc), colour = "steelblue", linetype = "dashed") +
+	labs(
+		title = "VAR forecast vs actual (test period)",
+		x = "Quarter",
+		y = "Box-Cox transformed housing price"
+	)
+
+ggsave("plots/02-07_var_forecast.png", plot = var_plot,
+			 width = 12, height = 8, units = "cm")
+
+
+# =============================================================================
+# End of script
+# =============================================================================
